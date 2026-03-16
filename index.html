@@ -44,15 +44,31 @@
     ];
 
     function getTodayKey() { return new Date().toISOString().slice(0, 10); }
+    function getCurrentTime() {
+      const now = new Date();
+      return `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+    }
     function formatDate(dateStr) {
       const d = new Date(dateStr + "T00:00:00");
       return d.toLocaleDateString("ja-JP", { month: "long", day: "numeric", weekday: "short" });
     }
     function calcKcal(food, grams) { return Math.round((food.kcalPer100g * grams) / 100); }
+
+    // 実摂取量 = 提供量 - 残量（残量がある場合）
+    function calcItemConsumedGrams(item) {
+      const grams = parseFloat(item.grams) || 0;
+      const leftover = item.leftoverGrams != null && item.leftoverGrams !== "" ? parseFloat(item.leftoverGrams) : null;
+      if (leftover !== null && !isNaN(leftover)) {
+        return Math.max(0, grams - leftover);
+      }
+      return grams;
+    }
+
     function calcMealKcal(meal, foods) {
       return (meal.items || []).reduce((sum, item) => {
         const food = foods.find(f => f.id === item.foodId);
-        return sum + (food ? calcKcal(food, item.grams) : 0);
+        const consumed = calcItemConsumedGrams(item);
+        return sum + (food ? calcKcal(food, consumed) : 0);
       }, 0);
     }
     function calcDailyIntake(meals, cats, foods, dateKey) {
@@ -164,11 +180,16 @@
       );
     }
 
-    // 複数フード入力行
+    // 複数フード入力行（残量対応）
     function FoodItemRow({ item, foods, onChange, onRemove, canRemove }) {
       const selectedFood = foods.find(f => f.id === item.foodId);
-      const kcal = selectedFood && item.grams && !isNaN(parseFloat(item.grams))
-        ? calcKcal(selectedFood, parseFloat(item.grams)) : null;
+      const grams = parseFloat(item.grams);
+      const leftover = item.leftoverGrams !== "" && item.leftoverGrams != null ? parseFloat(item.leftoverGrams) : null;
+      const consumed = (!isNaN(grams) && leftover !== null && !isNaN(leftover))
+        ? Math.max(0, grams - leftover) : (!isNaN(grams) ? grams : null);
+      const kcal = selectedFood && consumed !== null ? calcKcal(selectedFood, consumed) : null;
+      const hasLeftover = item.leftoverGrams !== "" && item.leftoverGrams != null;
+
       return (
         <div style={{ background: "#faf7f4", borderRadius: 13, padding: "12px 14px", marginBottom: 10, border: "1.5px solid #f0ede8" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
@@ -181,14 +202,34 @@
             style={{ ...S.input, marginBottom: 8, appearance: "none", backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23a09890' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E\")", backgroundRepeat: "no-repeat", backgroundPosition: "right 13px center", paddingRight: 36 }}>
             {foods.map(f => <option key={f.id} value={f.id}>{f.name}（{f.kcalPer100g}kcal/100g）</option>)}
           </select>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <input type="number" value={item.grams} onChange={e => onChange({ ...item, grams: e.target.value })}
-              placeholder="量(g)" min="0" step="0.1"
-              style={{ ...S.input, flex: 1 }} />
-            {kcal !== null && (
-              <div style={{ minWidth: 64, textAlign: "right", fontFamily: "'Zen Maru Gothic', sans-serif", fontWeight: 700, color: "#c97a52", fontSize: 15 }}>{kcal}kcal</div>
-            )}
+
+          {/* 提供量 */}
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 10, color: "#a09890", fontWeight: 700, marginBottom: 3 }}>提供量 (g)</div>
+              <input type="number" value={item.grams} onChange={e => onChange({ ...item, grams: e.target.value })}
+                placeholder="例: 60" min="0" step="0.1"
+                style={{ ...S.input }} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 10, color: "#a09890", fontWeight: 700, marginBottom: 3 }}>残量 (g) <span style={{ fontWeight: 400 }}>任意</span></div>
+              <input type="number" value={item.leftoverGrams ?? ""} onChange={e => onChange({ ...item, leftoverGrams: e.target.value })}
+                placeholder="残った量" min="0" step="0.1"
+                style={{ ...S.input }} />
+            </div>
           </div>
+
+          {/* 摂取量プレビュー */}
+          {kcal !== null && (
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "white", borderRadius: 9, padding: "7px 11px", border: "1px solid #f0ede8" }}>
+              <div style={{ fontSize: 11, color: "#a09890" }}>
+                {hasLeftover
+                  ? `摂取 ${consumed}g（提供 ${grams}g - 残 ${leftover}g）`
+                  : `摂取 ${grams}g`}
+              </div>
+              <div style={{ fontFamily: "'Zen Maru Gothic', sans-serif", fontWeight: 700, color: "#c97a52", fontSize: 14 }}>{kcal}kcal</div>
+            </div>
+          )}
         </div>
       );
     }
@@ -196,35 +237,51 @@
     function MealModal({ cats, foods, meal, onSave, onDelete, onClose }) {
       const [type, setType] = useState(meal?.type || "shared");
       const [catId, setCatId] = useState(meal?.catId || cats[0]?.id);
+      const [time, setTime] = useState(meal?.time || getCurrentTime());
       const defaultItems = meal?.items?.length
-        ? meal.items.map(i => ({ ...i, grams: i.grams.toString() }))
-        : [{ foodId: foods[0]?.id || "", grams: "" }];
+        ? meal.items.map(i => ({ ...i, grams: i.grams.toString(), leftoverGrams: i.leftoverGrams != null ? i.leftoverGrams.toString() : "" }))
+        : [{ foodId: foods[0]?.id || "", grams: "", leftoverGrams: "" }];
       const [items, setItems] = useState(defaultItems);
 
       const totalKcal = items.reduce((sum, item) => {
         const food = foods.find(f => f.id === item.foodId);
         const g = parseFloat(item.grams);
-        return sum + (food && !isNaN(g) ? calcKcal(food, g) : 0);
+        const l = item.leftoverGrams !== "" && item.leftoverGrams != null ? parseFloat(item.leftoverGrams) : null;
+        const consumed = (!isNaN(g) && l !== null && !isNaN(l)) ? Math.max(0, g - l) : (!isNaN(g) ? g : 0);
+        return sum + (food ? calcKcal(food, consumed) : 0);
       }, 0);
       const hasPreview = items.some(i => i.grams && !isNaN(parseFloat(i.grams)));
 
       function updateItem(idx, val) { setItems(prev => prev.map((it, i) => i === idx ? val : it)); }
       function removeItem(idx) { setItems(prev => prev.filter((_, i) => i !== idx)); }
-      function addItem() { setItems(prev => [...prev, { foodId: foods[0]?.id || "", grams: "" }]); }
+      function addItem() { setItems(prev => [...prev, { foodId: foods[0]?.id || "", grams: "", leftoverGrams: "" }]); }
 
       function handleSave() {
-        const validItems = items.filter(i => i.foodId && i.grams && !isNaN(parseFloat(i.grams)) && parseFloat(i.grams) > 0)
-          .map(i => ({ foodId: i.foodId, grams: parseFloat(i.grams) }));
+        const validItems = items
+          .filter(i => i.foodId && i.grams && !isNaN(parseFloat(i.grams)) && parseFloat(i.grams) > 0)
+          .map(i => ({
+            foodId: i.foodId,
+            grams: parseFloat(i.grams),
+            leftoverGrams: i.leftoverGrams !== "" && i.leftoverGrams != null && !isNaN(parseFloat(i.leftoverGrams))
+              ? parseFloat(i.leftoverGrams) : null,
+          }));
         if (validItems.length === 0) return;
-        onSave({ id: meal?.id, date: meal?.date, type, catId: type === "shared" ? null : catId, items: validItems });
+        onSave({ id: meal?.id, date: meal?.date, type, catId: type === "shared" ? null : catId, items: validItems, time });
       }
 
       return (
         <Modal title={meal ? "給餌記録を編集" : "給餌を記録する"} onClose={onClose}>
+          {/* 時刻 */}
+          <Field label="⏰ 給餌時刻">
+            <input type="time" value={time} onChange={e => setTime(e.target.value)}
+              style={{ ...S.input, borderColor: "#f0ede8" }} />
+          </Field>
+
           <SelectInput label="給餌タイプ" value={type} onChange={e => setType(e.target.value)}>
             <option value="shared">🐾 2匹一緒（体重比で自動分配）</option>
             {cats.map(c => <option key={c.id} value={c.id}>{c.emoji} {c.name}だけ</option>)}
           </SelectInput>
+
           {foods.length === 0 ? (
             <div style={{ background: "#fff0f0", borderRadius: 11, padding: "12px 14px", fontSize: 13, color: "#d04040", marginBottom: 14 }}>⚠️ フードが未登録です。先に「フード」タブから登録してください。</div>
           ) : (
@@ -286,7 +343,6 @@
       );
     }
 
-    // エクスポート/インポートモーダル
     function DataModal({ cats, foods, meals, onImport, onClose }) {
       const fileRef = useRef();
       function handleExport() {
@@ -305,8 +361,7 @@
           try {
             const data = JSON.parse(ev.target.result);
             if (data.cats && data.foods && data.meals) {
-              onImport(data);
-              onClose();
+              onImport(data); onClose();
             } else { alert("ファイルの形式が正しくありません"); }
           } catch { alert("読み込みに失敗しました"); }
         };
@@ -349,31 +404,47 @@
     }
 
     function MealsPage({ meals, cats, foods, onAdd, onEdit }) {
+      // 時刻順にソート
+      const sorted = [...meals].sort((a, b) => (a.time || "").localeCompare(b.time || ""));
       return (
         <div>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
             <div style={{ fontFamily: "'Zen Maru Gothic', sans-serif", fontSize: 18, fontWeight: 700, color: "#3d3530" }}>今日の給餌記録</div>
             <Btn onClick={onAdd}>＋ 追加</Btn>
           </div>
-          {meals.length === 0 ? (
+          {sorted.length === 0 ? (
             <div style={{ textAlign: "center", padding: "50px 0", color: "#c0b8b3", fontSize: 14 }}>まだ記録がありません 🍽</div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {meals.map(meal => {
+              {sorted.map(meal => {
                 const cat = cats.find(c => c.id === meal.catId);
                 const kcal = calcMealKcal(meal, foods);
-                const itemNames = (meal.items || []).map(i => {
+                const itemDetails = (meal.items || []).map(i => {
                   const food = foods.find(f => f.id === i.foodId);
-                  return food ? `${food.name} ${i.grams}g` : "不明";
-                }).join(" / ");
+                  const consumed = calcItemConsumedGrams(i);
+                  const hasLeftover = i.leftoverGrams != null && i.leftoverGrams !== "";
+                  if (!food) return "不明";
+                  return hasLeftover
+                    ? `${food.name} ${consumed}g食べた（${i.grams}g中 ${i.leftoverGrams}g残）`
+                    : `${food.name} ${i.grams}g`;
+                });
                 return (
                   <div key={meal.id} onClick={() => onEdit(meal)} style={{ ...S.card, padding: "14px 18px", cursor: "pointer" }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                       <div style={{ flex: 1, marginRight: 10 }}>
-                        <div style={{ fontFamily: "'Zen Maru Gothic', sans-serif", fontWeight: 700, color: "#3d3530", fontSize: 14 }}>
-                          {meal.type === "shared" ? "🐾 2匹一緒" : `${cat?.emoji} ${cat?.name}`}
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3 }}>
+                          <div style={{ fontFamily: "'Zen Maru Gothic', sans-serif", fontWeight: 700, color: "#3d3530", fontSize: 14 }}>
+                            {meal.type === "shared" ? "🐾 2匹一緒" : `${cat?.emoji} ${cat?.name}`}
+                          </div>
+                          {meal.time && (
+                            <div style={{ background: "#fdf0e8", color: "#c97a52", fontFamily: "'Zen Maru Gothic', sans-serif", fontWeight: 700, fontSize: 11, padding: "2px 8px", borderRadius: 99 }}>
+                              ⏰ {meal.time}
+                            </div>
+                          )}
                         </div>
-                        <div style={{ fontSize: 11, color: "#a09890", marginTop: 3, lineHeight: 1.5 }}>{itemNames}</div>
+                        <div style={{ fontSize: 11, color: "#a09890", lineHeight: 1.7 }}>
+                          {itemDetails.map((d, i) => <div key={i}>{d}</div>)}
+                        </div>
                       </div>
                       <div style={{ textAlign: "right", flexShrink: 0 }}>
                         <div style={{ fontFamily: "'Zen Maru Gothic', sans-serif", fontWeight: 700, color: "#c97a52", fontSize: 17 }}>{kcal}kcal</div>
@@ -447,6 +518,8 @@
             <div style={{ textAlign: "center", padding: "50px 0", color: "#c0b8b3", fontSize: 14 }}>過去の記録はまだありません 📅</div>
           ) : dates.map(date => {
             const intake = calcDailyIntake(meals, cats, foods, date);
+            // その日の給餌一覧（時刻順）
+            const dayMeals = meals.filter(m => m.date === date).sort((a, b) => (a.time || "").localeCompare(b.time || ""));
             return (
               <div key={date} style={{ ...S.card, marginBottom: 14 }}>
                 <div style={{ fontFamily: "'Zen Maru Gothic', sans-serif", fontWeight: 700, color: "#3d3530", marginBottom: 12, fontSize: 14 }}>{formatDate(date)}</div>
@@ -466,6 +539,26 @@
                     </div>
                   );
                 })}
+                {/* 給餌タイムライン */}
+                {dayMeals.length > 0 && (
+                  <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid #f0ede8" }}>
+                    <div style={{ fontSize: 11, color: "#a09890", fontWeight: 700, marginBottom: 8 }}>給餌タイムライン</div>
+                    {dayMeals.map(meal => {
+                      const cat = cats.find(c => c.id === meal.catId);
+                      const kcal = calcMealKcal(meal, foods);
+                      return (
+                        <div key={meal.id} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, fontSize: 12 }}>
+                          {meal.time
+                            ? <span style={{ color: "#c97a52", fontWeight: 700, fontFamily: "'Zen Maru Gothic', sans-serif", minWidth: 38 }}>{meal.time}</span>
+                            : <span style={{ color: "#d0c8c3", minWidth: 38 }}>--:--</span>
+                          }
+                          <span style={{ color: "#7a6f6a" }}>{meal.type === "shared" ? "🐾 2匹" : `${cat?.emoji} ${cat?.name}`}</span>
+                          <span style={{ color: "#c97a52", fontWeight: 700, marginLeft: "auto" }}>{kcal}kcal</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             );
           })}

@@ -403,8 +403,48 @@
       );
     }
 
+    // 給餌カード（MealsPage・HistoryPage 共通）
+    function MealCard({ meal, cats, foods, onEdit }) {
+      const cat = cats.find(c => c.id === meal.catId);
+      const kcal = calcMealKcal(meal, foods);
+      const itemDetails = (meal.items || []).map(i => {
+        const food = foods.find(f => f.id === i.foodId);
+        const consumed = calcItemConsumedGrams(i);
+        const hasLeftover = i.leftoverGrams != null && i.leftoverGrams !== "";
+        if (!food) return "不明";
+        return hasLeftover
+          ? `${food.name} ${consumed}g食べた（${i.grams}g中 ${i.leftoverGrams}g残）`
+          : `${food.name} ${i.grams}g`;
+      });
+      return (
+        <div onClick={onEdit ? () => onEdit(meal) : undefined}
+          style={{ ...S.card, padding: "14px 18px", cursor: onEdit ? "pointer" : "default" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+            <div style={{ flex: 1, marginRight: 10 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3 }}>
+                <div style={{ fontFamily: "'Zen Maru Gothic', sans-serif", fontWeight: 700, color: "#3d3530", fontSize: 14 }}>
+                  {meal.type === "shared" ? "🐾 2匹一緒" : `${cat?.emoji} ${cat?.name}`}
+                </div>
+                {meal.time && (
+                  <div style={{ background: "#fdf0e8", color: "#c97a52", fontFamily: "'Zen Maru Gothic', sans-serif", fontWeight: 700, fontSize: 11, padding: "2px 8px", borderRadius: 99 }}>
+                    ⏰ {meal.time}
+                  </div>
+                )}
+              </div>
+              <div style={{ fontSize: 11, color: "#a09890", lineHeight: 1.7 }}>
+                {itemDetails.map((d, i) => <div key={i}>{d}</div>)}
+              </div>
+            </div>
+            <div style={{ textAlign: "right", flexShrink: 0 }}>
+              <div style={{ fontFamily: "'Zen Maru Gothic', sans-serif", fontWeight: 700, color: "#c97a52", fontSize: 17 }}>{kcal}kcal</div>
+              {onEdit && <div style={{ fontSize: 10, color: "#c0b8b3" }}>タップで編集</div>}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     function MealsPage({ meals, cats, foods, onAdd, onEdit }) {
-      // 時刻順にソート
       const sorted = [...meals].sort((a, b) => (a.time || "").localeCompare(b.time || ""));
       return (
         <div>
@@ -416,44 +456,7 @@
             <div style={{ textAlign: "center", padding: "50px 0", color: "#c0b8b3", fontSize: 14 }}>まだ記録がありません 🍽</div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {sorted.map(meal => {
-                const cat = cats.find(c => c.id === meal.catId);
-                const kcal = calcMealKcal(meal, foods);
-                const itemDetails = (meal.items || []).map(i => {
-                  const food = foods.find(f => f.id === i.foodId);
-                  const consumed = calcItemConsumedGrams(i);
-                  const hasLeftover = i.leftoverGrams != null && i.leftoverGrams !== "";
-                  if (!food) return "不明";
-                  return hasLeftover
-                    ? `${food.name} ${consumed}g食べた（${i.grams}g中 ${i.leftoverGrams}g残）`
-                    : `${food.name} ${i.grams}g`;
-                });
-                return (
-                  <div key={meal.id} onClick={() => onEdit(meal)} style={{ ...S.card, padding: "14px 18px", cursor: "pointer" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                      <div style={{ flex: 1, marginRight: 10 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3 }}>
-                          <div style={{ fontFamily: "'Zen Maru Gothic', sans-serif", fontWeight: 700, color: "#3d3530", fontSize: 14 }}>
-                            {meal.type === "shared" ? "🐾 2匹一緒" : `${cat?.emoji} ${cat?.name}`}
-                          </div>
-                          {meal.time && (
-                            <div style={{ background: "#fdf0e8", color: "#c97a52", fontFamily: "'Zen Maru Gothic', sans-serif", fontWeight: 700, fontSize: 11, padding: "2px 8px", borderRadius: 99 }}>
-                              ⏰ {meal.time}
-                            </div>
-                          )}
-                        </div>
-                        <div style={{ fontSize: 11, color: "#a09890", lineHeight: 1.7 }}>
-                          {itemDetails.map((d, i) => <div key={i}>{d}</div>)}
-                        </div>
-                      </div>
-                      <div style={{ textAlign: "right", flexShrink: 0 }}>
-                        <div style={{ fontFamily: "'Zen Maru Gothic', sans-serif", fontWeight: 700, color: "#c97a52", fontSize: 17 }}>{kcal}kcal</div>
-                        <div style={{ fontSize: 10, color: "#c0b8b3" }}>タップで編集</div>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
+              {sorted.map(meal => <MealCard key={meal.id} meal={meal} cats={cats} foods={foods} onEdit={onEdit} />)}
             </div>
           )}
         </div>
@@ -509,7 +512,7 @@
       );
     }
 
-    function HistoryPage({ meals, cats, foods, today }) {
+    function HistoryPage({ meals, cats, foods, today, onEdit }) {
       const dates = [...new Set(meals.map(m => m.date))].sort((a, b) => b.localeCompare(a)).filter(d => d !== today);
       return (
         <div>
@@ -518,45 +521,38 @@
             <div style={{ textAlign: "center", padding: "50px 0", color: "#c0b8b3", fontSize: 14 }}>過去の記録はまだありません 📅</div>
           ) : dates.map(date => {
             const intake = calcDailyIntake(meals, cats, foods, date);
-            // その日の給餌一覧（時刻順）
             const dayMeals = meals.filter(m => m.date === date).sort((a, b) => (a.time || "").localeCompare(b.time || ""));
             return (
-              <div key={date} style={{ ...S.card, marginBottom: 14 }}>
-                <div style={{ fontFamily: "'Zen Maru Gothic', sans-serif", fontWeight: 700, color: "#3d3530", marginBottom: 12, fontSize: 14 }}>{formatDate(date)}</div>
-                {cats.map(cat => {
-                  const kcal = intake[cat.id] || 0;
-                  const pct = Math.min(100, Math.round((kcal / cat.targetKcal) * 100));
-                  const over = kcal > cat.targetKcal;
-                  return (
-                    <div key={cat.id} style={{ marginBottom: 10 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 5 }}>
-                        <span style={{ color: "#7a6f6a" }}>{cat.emoji} {cat.name}</span>
-                        <span style={{ fontWeight: 700, color: over ? "#d04040" : "#c97a52" }}>{kcal} / {cat.targetKcal}kcal</span>
-                      </div>
-                      <div style={{ background: "#ede8e2", borderRadius: 99, height: 7 }}>
-                        <div style={{ width: `${pct}%`, height: "100%", borderRadius: 99, background: over ? "#d04040" : "#c97a52" }} />
-                      </div>
-                    </div>
-                  );
-                })}
-                {/* 給餌タイムライン */}
-                {dayMeals.length > 0 && (
-                  <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid #f0ede8" }}>
-                    <div style={{ fontSize: 11, color: "#a09890", fontWeight: 700, marginBottom: 8 }}>給餌タイムライン</div>
-                    {dayMeals.map(meal => {
-                      const cat = cats.find(c => c.id === meal.catId);
-                      const kcal = calcMealKcal(meal, foods);
-                      return (
-                        <div key={meal.id} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, fontSize: 12 }}>
-                          {meal.time
-                            ? <span style={{ color: "#c97a52", fontWeight: 700, fontFamily: "'Zen Maru Gothic', sans-serif", minWidth: 38 }}>{meal.time}</span>
-                            : <span style={{ color: "#d0c8c3", minWidth: 38 }}>--:--</span>
-                          }
-                          <span style={{ color: "#7a6f6a" }}>{meal.type === "shared" ? "🐾 2匹" : `${cat?.emoji} ${cat?.name}`}</span>
-                          <span style={{ color: "#c97a52", fontWeight: 700, marginLeft: "auto" }}>{kcal}kcal</span>
+              <div key={date} style={{ marginBottom: 22 }}>
+                {/* 日付ヘッダー */}
+                <div style={{ fontFamily: "'Zen Maru Gothic', sans-serif", fontWeight: 700, color: "#3d3530", fontSize: 15, marginBottom: 10 }}>
+                  {formatDate(date)}
+                </div>
+
+                {/* カロリーサマリー */}
+                <div style={{ ...S.card, marginBottom: 10 }}>
+                  {cats.map(cat => {
+                    const kcal = intake[cat.id] || 0;
+                    const pct = Math.min(100, Math.round((kcal / cat.targetKcal) * 100));
+                    const over = kcal > cat.targetKcal;
+                    return (
+                      <div key={cat.id} style={{ marginBottom: 10 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 5 }}>
+                          <span style={{ color: "#7a6f6a" }}>{cat.emoji} {cat.name}</span>
+                          <span style={{ fontWeight: 700, color: over ? "#d04040" : "#c97a52" }}>{kcal} / {cat.targetKcal}kcal</span>
                         </div>
-                      );
-                    })}
+                        <div style={{ background: "#ede8e2", borderRadius: 99, height: 7 }}>
+                          <div style={{ width: `${pct}%`, height: "100%", borderRadius: 99, background: over ? "#d04040" : "#c97a52" }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* 給餌カード一覧（今日の給餌記録と同じ表示） */}
+                {dayMeals.length > 0 && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    {dayMeals.map(meal => <MealCard key={meal.id} meal={meal} cats={cats} foods={foods} onEdit={onEdit} />)}
                   </div>
                 )}
               </div>
@@ -630,7 +626,7 @@
             {tab === 1 && <MealsPage meals={todayMeals} cats={cats} foods={foods} onAdd={() => setModal({ type: "addMeal" })} onEdit={m => setModal({ type: "editMeal", data: m })} />}
             {tab === 2 && <CatsPage cats={cats} onEdit={cat => setModal({ type: "editCat", data: cat })} />}
             {tab === 3 && <FoodsPage foods={foods} onAdd={() => setModal({ type: "addFood" })} onEdit={f => setModal({ type: "editFood", data: f })} />}
-            {tab === 4 && <HistoryPage meals={meals} cats={cats} foods={foods} today={today} />}
+            {tab === 4 && <HistoryPage meals={meals} cats={cats} foods={foods} today={today} onEdit={m => setModal({ type: "editMeal", data: m })} />}
           </div>
 
           <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, background: "white", borderTop: "2px solid #f0ede8", display: "flex", zIndex: 50 }}>

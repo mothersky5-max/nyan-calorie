@@ -43,7 +43,10 @@
       { icon: "🐾", label: "猫設定" }, { icon: "🥣", label: "フード" }, { icon: "📅", label: "履歴" },
     ];
 
-    function getTodayKey() { return new Date().toISOString().slice(0, 10); }
+    function getTodayKey() {
+      const d = new Date();
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    }
     function getCurrentTime() {
       const now = new Date();
       return `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
